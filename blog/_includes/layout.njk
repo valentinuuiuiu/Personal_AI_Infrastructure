@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.6;
+            margin: 2em;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            padding: 1em;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        {{ content | safe }}
+    </main>
+</body>
+</html>
