@@ -61,3 +61,8 @@ out/
 private/
 secrets/
 credentials/
+
+# Project-specific ignores
+/blog/node_modules/
+/blog/_site/
+*.log
