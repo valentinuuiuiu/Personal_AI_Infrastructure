@@ -19,9 +19,9 @@ This protocol outlines the technical and procedural steps to enhance the securit
     *   **Goal:** Block malicious traffic, including SQL injection and XSS attacks, at the edge.
 
 ### 3.  **Strengthen Authentication and Access Control**
-    *   **Action:** Enforce multi-factor authentication (MFA) for all user and admin accounts.
-    *   **Principle:** Implement the principle of least privilege, ensuring users have only the permissions they need.
-    *   **Goal:** Prevent unauthorized access and reduce the impact of compromised accounts.
+    *   **Action:** Leverage our secure and smooth Supabase authentication, including Google Auth, to provide a seamless and safe login experience for new users.
+    *   **Principle:** Implement the principle of least privilege for all internal and admin accounts, ensuring users have only the permissions they need.
+    *   **Future Goal:** Re-evaluate the implementation of mandatory MFA for all users once the marketplace has established a significant user base.
 
 ### 4.  **Enhance Data Protection**
     *   **Action:** Encrypt all sensitive data, both in transit (TLS 1.3) and at rest.
