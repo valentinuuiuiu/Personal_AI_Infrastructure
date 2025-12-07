@@ -61,6 +61,4 @@ out/
 private/
 secrets/
 credentials/
-
-# Python
 __pycache__/
