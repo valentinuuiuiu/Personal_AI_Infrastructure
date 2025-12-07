@@ -40,41 +40,8 @@
     typing = false;
   }
 
-  async function handleCommand(cmd: string) {
+  function handleCommand(cmd: string) {
     commandHistory = [...commandHistory, cmd];
-    terminalContent = ''; // Clear previous content
-
-    if (cmd.startsWith('ask ') || cmd.startsWith('run_agent ') || cmd.startsWith('extract_wisdom ')) {
-      typing = true;
-      try {
-        const response = await fetch('/api/cli', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ command: cmd }),
-        });
-
-        if (!response.body) {
-          typeContent('Error: No response body');
-          return;
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          terminalContent += decoder.decode(value, { stream: true });
-        }
-      } catch (error) {
-        terminalContent = 'An unexpected error occurred.';
-      } finally {
-        typing = false;
-      }
-      return;
-    }
     
     switch (cmd) {
       case 'clear':
@@ -102,14 +69,14 @@
         typeContent(Object.keys(pages).join('\n'));
         break;
       default:
-        const page = cmd.slice(3);
-        if (pages[page]) {
-          typeContent(pages[page]);
-        } else {
-          typeContent(`Error: Command '${cmd}' not found`);
+          const page = cmd.slice(3);
+          if (pages[page]) {
+            typeContent(pages[page]);
+          } else {
+            typeContent(`Error: Page '${page}' not found`);
+          }
         }
     }
-  }
 
   function handleKeydown(event: KeyboardEvent) {
     if (typing) return;

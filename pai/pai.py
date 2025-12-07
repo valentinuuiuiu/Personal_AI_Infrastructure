@@ -1,43 +1,19 @@
 import sys
 import subprocess
 import os
-import argparse
-import uuid
-from emitter import create_event, emit_event
 
 def main():
     """
     Main orchestrator for the PAI CLI.
     Identifies the command and delegates to the appropriate skill script.
     """
-    parser = argparse.ArgumentParser(description="PAI CLI")
-    parser.add_argument("command", help="The command to execute.")
-    parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments for the command.")
-
-    # We need to parse known arguments for the CLI itself,
-    # and leave the rest for the skill script.
-    # For now, we'll just look for a --stream flag.
-    stream_arg = '--stream'
-    args = sys.argv[1:]
-
-    if not args:
-        parser.print_help()
+    if len(sys.argv) < 2:
+        print("Usage: python pai/pai.py <command> [args...]")
+        print("Available commands: ask")
         sys.exit(1)
 
-    command = args[0]
-    command_args = args[1:]
-
-    # Create a unique session ID for this execution
-    session_id = str(uuid.uuid4())
-
-    # Emit an event for the skill execution
-    event = create_event(
-        source_app="pai-cli",
-        hook_event_type=f"ExecuteSkill:{command}",
-        payload={"command": command, "args": command_args},
-        session_id=session_id
-    )
-    emit_event(event)
+    command = sys.argv[1]
+    args = sys.argv[2:]
 
     # Construct the path to the skills directory
     skills_dir = os.path.join(os.path.dirname(__file__), 'skills')
@@ -47,38 +23,57 @@ def main():
         print(f"Error: Command '{command}' not found.")
         sys.exit(1)
 
-    # Execute the skill script as a module to allow relative imports
+    # Determine if streaming is requested
+    stream_enabled = "--stream" in args
+
     try:
-        # We need to pass the OPENROUTER_API_KEY to the subprocess environment
         env = os.environ.copy()
+        cmd = ['python3', skill_path] + args
 
-        # Use Popen for streaming
-        process = subprocess.Popen(
-            [sys.executable, '-m', f'pai.skills.{command}'] + command_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env
-        )
+        if stream_enabled:
+            # For streaming, we need to handle stdout line by line
+            with subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                bufsize=1,
+                universal_newlines=True
+            ) as process:
+                # Stream stdout
+                for line in process.stdout:
+                    print(line, end='', flush=True)
 
-        # Stream stdout
-        if process.stdout:
-            for line in iter(process.stdout.readline, ''):
-                print(line, end='', flush=True)
+                # Wait for the process to finish and capture stderr
+                stderr_output = process.communicate()[1]
+                if process.returncode != 0:
+                    print(f"\nError executing command '{command}':", file=sys.stderr)
+                    if stderr_output:
+                        print(stderr_output, file=sys.stderr)
+                    sys.exit(process.returncode)
+        else:
+            # For non-streaming, we can use the simpler subprocess.run
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                env=env
+            )
+            print(result.stdout, end='')
+            if result.stderr:
+                print(result.stderr, file=sys.stderr, end='')
 
-        # Wait for the process to finish and capture stderr
-        stdout, stderr = process.communicate()
-
-        if stderr:
-            print(stderr, file=sys.stderr)
-
-        if process.returncode != 0:
-            print(f"Error executing command '{command}'.", file=sys.stderr)
-            sys.exit(1)
-
-
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command '{command}':", file=sys.stderr)
+        print(e.stderr, file=sys.stderr)
+        sys.exit(1)
     except FileNotFoundError:
-        print(f"Error: '{sys.executable}' interpreter not found. Please make sure Python 3 is installed and in your PATH.")
+        print("Error: 'python3' interpreter not found. Please make sure Python 3 is installed and in your PATH.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}", file=sys.stderr)
         sys.exit(1)
 
 

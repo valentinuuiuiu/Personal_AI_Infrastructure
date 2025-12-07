@@ -1,7 +1,25 @@
 import os
 import sys
-import argparse
-from ..llm_utils import call_llm
+from openai import OpenAI
+
+_client = None
+
+def get_client():
+    """
+    Initializes and returns the OpenAI client, creating it only once.
+    """
+    global _client
+    if _client is None:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            # We raise an exception here to be handled by the calling function
+            raise ValueError("OPENROUTER_API_KEY environment variable not set.")
+
+        _client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
+    return _client
 
 def load_context(context_name: str) -> str:
     """
@@ -18,52 +36,94 @@ def load_context(context_name: str) -> str:
         print(f"Error loading context '{context_name}': {e}", file=sys.stderr)
         return ""
 
+def call_llm(messages: list) -> str:
+    """
+    Sends a list of messages to the LLM and returns the content of the response.
+    """
+    try:
+        client = get_client()
+        completion = client.chat.completions.create(
+            model="x-ai/grok-4-fast",
+            messages=messages,
+            temperature=0.1, # Lower temperature for more predictable validation
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"An error occurred: {e}"
+
+def call_llm_stream(messages: list):
+    """
+    Sends a list of messages to the LLM and yields the content chunks as they arrive.
+    """
+    try:
+        client = get_client()
+        stream = client.chat.completions.create(
+            model="x-ai/grok-4-fast",
+            messages=messages,
+            stream=True,
+            temperature=0.1,
+        )
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+    except Exception as e:
+        # Let the caller handle the exception to provide context
+        raise e
+
 def main():
     """
-    Main execution flow: get answer, optionally validate it, and print the result.
+    Main execution flow: get answer, validate it, and print the result.
+    Supports a --stream flag to bypass validation and stream the response.
     """
-    parser = argparse.ArgumentParser(description="Ask the PAI a question.")
-    parser.add_argument("--stream", action="store_true", help="Enable streaming response.")
-    parser.add_argument("prompt", nargs='+', help="The prompt to send to the PAI.")
-    args = parser.parse_args()
+    try:
+        stream_enabled = "--stream" in sys.argv
+        if stream_enabled:
+            sys.argv.remove("--stream")
 
-    user_prompt = " ".join(args.prompt)
+        if len(sys.argv) <= 1:
+            print("Usage: python pai/skills/ask.py [--stream] <your_prompt>")
+            sys.exit(1)
 
-    # 1. Generate the initial answer
-    personality_context = load_context("personality")
-    generation_messages = [
-        {"role": "system", "content": personality_context},
-        {"role": "user", "content": user_prompt}
-    ]
+        user_prompt = " ".join(sys.argv[1:])
 
-    if args.stream:
-        # Stream the response directly to stdout
-        for chunk in call_llm(generation_messages, stream=True):
-            print(chunk, end='', flush=True)
-        print() # for a final newline
-    else:
-        # Get the full response and then validate it
-        initial_answer = call_llm(generation_messages, stream=False)
-
-        # 2. Validate the answer
-        validator_context = load_context("validator")
-        validation_prompt = f"Original Question: \"{user_prompt}\"\n\nResponse to Validate: \"{initial_answer}\""
-        validation_messages = [
-            {"role": "system", "content": validator_context},
-            {"role": "user", "content": validation_prompt}
-        ]
-        validation_result = call_llm(validation_messages, stream=False).strip().upper()
-
-        # Clean up validation result to be robust
-        if "INVALID" in validation_result:
-            validation_status = "INVALID"
-        elif "VALID" in validation_result:
-            validation_status = "VALID"
+        if stream_enabled:
+            personality_context = load_context("personality")
+            generation_messages = [
+                {"role": "system", "content": personality_context},
+                {"role": "user", "content": user_prompt}
+            ]
+            for chunk in call_llm_stream(generation_messages):
+                print(chunk, end='', flush=True)
+            print() # Ensure a final newline
         else:
-            validation_status = "UNKNOWN" # Fallback if the validator doesn't behave
+            personality_context = load_context("personality")
+            generation_messages = [
+                {"role": "system", "content": personality_context},
+                {"role": "user", "content": user_prompt}
+            ]
+            initial_answer = call_llm(generation_messages)
 
-        # 3. Print the final, observable output
-        print(f"[VALIDATION: {validation_status}] {initial_answer}")
+            validator_context = load_context("validator")
+            validation_prompt = f"Original Question: \"{user_prompt}\"\n\nResponse to Validate: \"{initial_answer}\""
+            validation_messages = [
+                {"role": "system", "content": validator_context},
+                {"role": "user", "content": validation_prompt}
+            ]
+            validation_result = call_llm(validation_messages).strip().upper()
+
+            if "INVALID" in validation_result:
+                validation_status = "INVALID"
+            elif "VALID" in validation_result:
+                validation_status = "VALID"
+            else:
+                validation_status = "UNKNOWN"
+
+            print(f"[VALIDATION: {validation_status}] {initial_answer}")
+
+    except Exception as e:
+        print(f"An error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
