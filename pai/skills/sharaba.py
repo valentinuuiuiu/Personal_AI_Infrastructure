@@ -1,74 +1,49 @@
-# This script is designed to be executed as a standalone module by the PAI skill runner (`pai/pai.py`).
-# It follows the existing architectural pattern of other skills, which are invoked directly
-# rather than being instantiated as classes.
-
-import cv2
+# This script is designed to be executed as a standalone module or imported and called directly.
+import argparse
+import sys
 import os
-import tempfile
 
 def analyze_emotion(image_path):
     """
     Placeholder for Hume AI emotion analysis.
-    In the future, this function will use the Hume AI SDK to analyze the image.
     """
-    # Mock analysis result
+    if not os.path.exists(image_path):
+        # Raise an exception instead of exiting, so it can be caught by the web service.
+        raise FileNotFoundError(f"Error: Image file not found at {image_path}")
+
     mock_emotions = {
-        "Joy": 0.7,
-        "Sadness": 0.1,
-        "Surprise": 0.2,
+        "Joy": 0.7, "Sadness": 0.1, "Surprise": 0.2,
     }
 
-    analysis_text = "Detected emotions:\n"
+    analysis_text = "Detected emotions from the provided image:\n"
     for emotion, score in mock_emotions.items():
         analysis_text += f"- {emotion}: {score*100:.1f}%\n"
 
     return analysis_text
 
-def main():
+def run(args):
     """
-    Captures an image from the webcam, saves it, and analyzes it for emotions.
+    Analyzes an image file for emotions from a given path.
     """
-    # Initialize the webcam
-    cap = cv2.VideoCapture(0)
-
-    if not cap.isOpened():
-        print("Error: Could not open webcam.")
-        return
-
-    # Capture a single frame
-    ret, frame = cap.read()
-
-    # Release the webcam
-    cap.release()
-
-    if not ret:
-        print("Error: Could not read frame from webcam.")
-        return
-
-    # Create a temporary file in a platform-agnostic way
-    temp_image_path = ""
     try:
-        # Create a named temporary file, get its path, and then close it
-        # so that cv2.imwrite can open and write to it.
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_f:
-            temp_image_path = temp_f.name
+        emotion_analysis = analyze_emotion(args.image_path)
 
-        cv2.imwrite(temp_image_path, frame)
-        print(f"Image captured and saved to {temp_image_path}")
-
-        # Analyze the image for emotions
-        emotion_analysis = analyze_emotion(temp_image_path)
-
-        print("\n--- Sharaba Kavacham Analysis ---")
-        print(emotion_analysis)
-        print("---------------------------------")
-
-    finally:
-        # Clean up the temporary file
-        if temp_image_path and os.path.exists(temp_image_path):
-            os.remove(temp_image_path)
-            print(f"Temporary file {temp_image_path} removed.")
-
+        output = "\n--- Sharaba Kavacham Analysis ---\n"
+        output += emotion_analysis
+        output += "---------------------------------\n"
+        return output
+    except Exception as e:
+        # Re-raise the exception so it can be handled by the caller (the web service)
+        raise e
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Analyze emotions from an image file.")
+    parser.add_argument("image_path", help="The full path to the image file to analyze.")
+    args = parser.parse_args()
+
+    try:
+        result = run(args)
+        print(result)
+    except Exception as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)

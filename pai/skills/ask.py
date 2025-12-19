@@ -18,18 +18,12 @@ def load_context(context_name: str) -> str:
         print(f"Error loading context '{context_name}': {e}", file=sys.stderr)
         return ""
 
-def main():
+def run(args):
     """
-    Main execution flow: get answer, optionally validate it, and print the result.
+    Main execution flow: get answer, optionally validate it, and yield the result.
     """
-    parser = argparse.ArgumentParser(description="Ask the PAI a question.")
-    parser.add_argument("--stream", action="store_true", help="Enable streaming response.")
-    parser.add_argument("prompt", nargs='+', help="The prompt to send to the PAI.")
-    args = parser.parse_args()
-
     user_prompt = " ".join(args.prompt)
 
-    # 1. Generate the initial answer
     personality_context = load_context("personality")
     generation_messages = [
         {"role": "system", "content": personality_context},
@@ -37,15 +31,11 @@ def main():
     ]
 
     if args.stream:
-        # Stream the response directly to stdout
+        # Yield the response in chunks for streaming
         for chunk in call_llm(generation_messages, stream=True):
-            print(chunk, end='', flush=True)
-        print() # for a final newline
+            yield chunk
     else:
-        # Get the full response and then validate it
         initial_answer = call_llm(generation_messages, stream=False)
-
-        # 2. Validate the answer
         validator_context = load_context("validator")
         validation_prompt = f"Original Question: \"{user_prompt}\"\n\nResponse to Validate: \"{initial_answer}\""
         validation_messages = [
@@ -54,16 +44,21 @@ def main():
         ]
         validation_result = call_llm(validation_messages, stream=False).strip().upper()
 
-        # Clean up validation result to be robust
         if "INVALID" in validation_result:
             validation_status = "INVALID"
         elif "VALID" in validation_result:
             validation_status = "VALID"
         else:
-            validation_status = "UNKNOWN" # Fallback if the validator doesn't behave
+            validation_status = "UNKNOWN"
 
-        # 3. Print the final, observable output
-        print(f"[VALIDATION: {validation_status}] {initial_answer}")
+        yield f"[VALIDATION: {validation_status}] {initial_answer}"
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Ask the PAI a question.")
+    parser.add_argument("--stream", action="store_true", help="Enable streaming response.")
+    parser.add_argument("prompt", nargs='+', help="The prompt to send to the PAI.")
+    args = parser.parse_args()
+
+    for chunk in run(args):
+        print(chunk, end='', flush=True)
+    print()
