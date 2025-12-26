@@ -61,3 +61,7 @@ out/
 private/
 secrets/
 credentials/
+
+# Python
+__pycache__/
+*.pyc
