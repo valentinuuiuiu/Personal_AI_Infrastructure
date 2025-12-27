@@ -1,17 +1,7 @@
 import os
 import sys
-from openai import OpenAI
-
-# Initialize the OpenAI client once
-api_key = os.getenv("OPENROUTER_API_KEY")
-if not api_key:
-    print("Error: OPENROUTER_API_KEY environment variable not set.", file=sys.stderr)
-    sys.exit(1)
-
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=api_key,
-)
+import argparse
+from ..llm_utils import call_llm
 
 def load_context(context_name: str) -> str:
     """
@@ -28,29 +18,16 @@ def load_context(context_name: str) -> str:
         print(f"Error loading context '{context_name}': {e}", file=sys.stderr)
         return ""
 
-def call_llm(messages: list) -> str:
-    """
-    Sends a list of messages to the LLM and returns the content of the response.
-    """
-    try:
-        completion = client.chat.completions.create(
-            model="minimax/minimax-m2:free",
-            messages=messages,
-            temperature=0.1, # Lower temperature for more predictable validation
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"An error occurred: {e}"
-
 def main():
     """
-    Main execution flow: get answer, validate it, and print the result.
+    Main execution flow: get answer, optionally validate it, and print the result.
     """
-    if len(sys.argv) <= 1:
-        print("Usage: python pai/skills/ask.py <your_prompt>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Ask the PAI a question.")
+    parser.add_argument("--stream", action="store_true", help="Enable streaming response.")
+    parser.add_argument("prompt", nargs='+', help="The prompt to send to the PAI.")
+    args = parser.parse_args()
 
-    user_prompt = " ".join(sys.argv[1:])
+    user_prompt = " ".join(args.prompt)
 
     # 1. Generate the initial answer
     personality_context = load_context("personality")
@@ -58,27 +35,35 @@ def main():
         {"role": "system", "content": personality_context},
         {"role": "user", "content": user_prompt}
     ]
-    initial_answer = call_llm(generation_messages)
 
-    # 2. Validate the answer
-    validator_context = load_context("validator")
-    validation_prompt = f"Original Question: \"{user_prompt}\"\n\nResponse to Validate: \"{initial_answer}\""
-    validation_messages = [
-        {"role": "system", "content": validator_context},
-        {"role": "user", "content": validation_prompt}
-    ]
-    validation_result = call_llm(validation_messages).strip().upper()
-
-    # Clean up validation result to be robust
-    if "INVALID" in validation_result:
-        validation_status = "INVALID"
-    elif "VALID" in validation_result:
-        validation_status = "VALID"
+    if args.stream:
+        # Stream the response directly to stdout
+        for chunk in call_llm(generation_messages, stream=True):
+            print(chunk, end='', flush=True)
+        print() # for a final newline
     else:
-        validation_status = "UNKNOWN" # Fallback if the validator doesn't behave
+        # Get the full response and then validate it
+        initial_answer = call_llm(generation_messages, stream=False)
 
-    # 3. Print the final, observable output
-    print(f"[VALIDATION: {validation_status}] {initial_answer}")
+        # 2. Validate the answer
+        validator_context = load_context("validator")
+        validation_prompt = f"Original Question: \"{user_prompt}\"\n\nResponse to Validate: \"{initial_answer}\""
+        validation_messages = [
+            {"role": "system", "content": validator_context},
+            {"role": "user", "content": validation_prompt}
+        ]
+        validation_result = call_llm(validation_messages, stream=False).strip().upper()
+
+        # Clean up validation result to be robust
+        if "INVALID" in validation_result:
+            validation_status = "INVALID"
+        elif "VALID" in validation_result:
+            validation_status = "VALID"
+        else:
+            validation_status = "UNKNOWN" # Fallback if the validator doesn't behave
+
+        # 3. Print the final, observable output
+        print(f"[VALIDATION: {validation_status}] {initial_answer}")
 
 if __name__ == "__main__":
     main()

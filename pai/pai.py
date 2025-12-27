@@ -1,72 +1,87 @@
 import sys
 import subprocess
 import os
+import argparse
+import uuid
+from emitter import create_event, emit_event
 
 def main():
     """
     Main orchestrator for the PAI CLI.
     Identifies the command and delegates to the appropriate skill script.
     """
-    if len(sys.argv) < 2:
-        print("Usage: python pai/pai.py <command> [args...]")
-        print("Available commands: ask, story")
+    parser = argparse.ArgumentParser(description="PAI CLI")
+    parser.add_argument("command", help="The command to execute.")
+    parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments for the command.")
+
+    args = sys.argv[1:]
+
+    if not args:
+        parser.print_help()
         sys.exit(1)
 
-    command = sys.argv[1]
+    command = args[0]
+    command_args = args[1:]
 
     # --- SECURITY: Command Allow-List ---
-    # Only allow known, safe commands to prevent path traversal.
     allowed_commands = {"ask", "story"}
     if command not in allowed_commands:
         print(f"Error: Command '{command}' is not a valid command.")
         sys.exit(1)
 
-    args = sys.argv[2:]
+    session_id = str(uuid.uuid4())
+    event = create_event(
+        source_app="pai-cli",
+        hook_event_type=f"ExecuteSkill:{command}",
+        payload={"command": command, "args": command_args},
+        session_id=session_id
+    )
+    emit_event(event)
 
-    # Construct the path to the skills directory
     skills_dir = os.path.join(os.path.dirname(__file__), 'skills')
 
     if command == "story":
         skill_path = os.path.join(skills_dir, "jules-the-storyteller.ts")
         interpreter = "bun"
+        cwd = "blog"
+        command_list = [interpreter, 'run', os.path.join('..', skill_path)] + command_args
     else:
         skill_path = os.path.join(skills_dir, f"{command}.py")
-        interpreter = "python3"
+        interpreter = sys.executable
+        cwd = None
+        command_list = [interpreter, '-m', f'pai.skills.{command}'] + command_args
 
     if not os.path.exists(skill_path):
         print(f"Error: Command '{command}' not found.")
         sys.exit(1)
 
-    # Execute the skill script as a subprocess, passing arguments
     try:
-        # We need to pass the OPENROUTER_API_KEY to the subprocess environment
         env = os.environ.copy()
-
-        # Ensure the correct interpreter is used for execution
-        # For bun, we need to run it from the 'blog' directory to access node_modules
-        cwd = 'blog' if interpreter == 'bun' else None
-        command_list = [interpreter, 'run', os.path.join('..', skill_path)] + args if interpreter == "bun" else [interpreter, skill_path] + args
-
-        process = subprocess.run(
+        process = subprocess.Popen(
             command_list,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=True,
             env=env,
             cwd=cwd
         )
-        print(process.stdout, end='')
-        if process.stderr:
-            print(process.stderr, end='')
 
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing command '{command}':")
-        print(e.stderr)
-        sys.exit(1)
+        if process.stdout:
+            for line in iter(process.stdout.readline, ''):
+                print(line, end='', flush=True)
+
+        stdout, stderr = process.communicate()
+
+        if stderr:
+            print(stderr, file=sys.stderr)
+
+        if process.returncode != 0:
+            print(f"Error executing command '{command}'.", file=sys.stderr)
+            sys.exit(1)
+
     except FileNotFoundError:
-        print(f"Error: 'python3' interpreter not found. Please make sure Python 3 is installed and in your PATH.")
+        print(f"Error: '{interpreter}' interpreter not found.")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
